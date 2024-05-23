@@ -34,6 +34,8 @@ public class Templates {
                 return "login-password.ftl";
             case LOGIN_TOTP:
                 return "login-otp.ftl";
+            case LOGIN_RESET_OTP:
+                return "login-reset-otp.ftl";
             case LOGIN_CONFIG_TOTP:
                 return "login-config-totp.ftl";
             case LOGIN_RECOVERY_AUTHN_CODES_INPUT:
@@ -46,6 +48,8 @@ public class Templates {
                 return "login-verify-email.ftl";
             case LOGIN_IDP_LINK_CONFIRM:
                 return "login-idp-link-confirm.ftl";
+            case LOGIN_IDP_LINK_CONFIRM_OVERRIDE:
+                return "login-idp-link-confirm-override.ftl";
             case LOGIN_IDP_LINK_EMAIL:
                 return "login-idp-link-email.ftl";
             case OAUTH_GRANT:
@@ -60,8 +64,6 @@ public class Templates {
                 return "select-authenticator.ftl";
             case REGISTER:
                 return "register.ftl";
-            case REGISTER_USER_PROFILE:
-                return "register-user-profile.ftl";
             case INFO:
                 return "info.ftl";
             case ERROR:
@@ -70,6 +72,8 @@ public class Templates {
                 return "webauthn-error.ftl";
             case LOGIN_UPDATE_PROFILE:
                 return "login-update-profile.ftl";
+            case UPDATE_EMAIL:
+                return "update-email.ftl";
             case CODE:
                 return "code.ftl";
             case LOGIN_PAGE_EXPIRED:
@@ -78,12 +82,12 @@ public class Templates {
                 return "login-x509-info.ftl";
             case SAML_POST_FORM:
                 return "saml-post-form.ftl";
-            case UPDATE_USER_PROFILE:
-                return "update-user-profile.ftl";
             case IDP_REVIEW_USER_PROFILE:
                 return "idp-review-user-profile.ftl";
             case FRONTCHANNEL_LOGOUT:
                 return "frontchannel-logout.ftl";
+            case LOGOUT_CONFIRM:
+                return "logout-confirm.ftl";
             default:
                 throw new IllegalArgumentException();
         }

@@ -18,9 +18,10 @@
 package org.keycloak.testsuite.webauthn.pages;
 
 import org.hamcrest.CoreMatchers;
-import org.keycloak.testsuite.pages.AbstractPage;
+import org.keycloak.testsuite.pages.LogoutSessionsPage;
 import org.keycloak.testsuite.util.WaitUtils;
 import org.openqa.selenium.Alert;
+import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebElement;
@@ -39,7 +40,7 @@ import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
  * Page will be displayed after successful JS call of "navigator.credentials.create", which will register WebAuthn credential
  * with the browser
  */
-public class WebAuthnRegisterPage extends AbstractPage {
+public class WebAuthnRegisterPage extends LogoutSessionsPage {
 
     public static final long ALERT_CHECK_TIMEOUT = 3; //seconds
     public static final long ALERT_DEFAULT_TIMEOUT = 60; //seconds
@@ -67,7 +68,7 @@ public class WebAuthnRegisterPage extends AbstractPage {
 
     public void registerWebAuthnCredential(String authenticatorLabel) {
         if (!isRegisterAlertPresent(ALERT_DEFAULT_TIMEOUT)) {
-            throw new TimeoutException("Cannot register Security Key due to missing prompt for registration");
+            throw new TimeoutException("Cannot register Passkey due to missing prompt for registration");
         }
 
         Alert promptDialog = driver.switchTo().alert();
@@ -85,7 +86,7 @@ public class WebAuthnRegisterPage extends AbstractPage {
             // label edit after registering authenticator by .create()
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(seconds));
             Alert promptDialog = wait.until(ExpectedConditions.alertIsPresent());
-            assertThat(promptDialog.getText(), CoreMatchers.is("Please input your registered authenticator's label"));
+            assertThat(promptDialog.getText(), CoreMatchers.is("Please input your registered passkey's label"));
             return true;
         } catch (TimeoutException e) {
             return false;
@@ -114,8 +115,8 @@ public class WebAuthnRegisterPage extends AbstractPage {
     @Override
     public boolean isCurrent() {
         final String formTitle = getFormTitle();
-        return formTitle != null && formTitle.equals("Security Key Registration") &&
-                driver.getPageSource().contains("navigator.credentials.create");
+        return formTitle != null && formTitle.equals("Passkey Registration") &&
+                driver.findElement(By.id("registerWebAuthn")).isDisplayed();
     }
 
     @Override

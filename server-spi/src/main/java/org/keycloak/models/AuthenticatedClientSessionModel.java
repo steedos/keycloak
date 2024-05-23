@@ -20,24 +20,17 @@ package org.keycloak.models;
 
 import java.util.Map;
 
+import org.keycloak.common.util.Time;
 import org.keycloak.sessions.CommonClientSessionModel;
-import org.keycloak.storage.SearchableModelField;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
 public interface AuthenticatedClientSessionModel extends CommonClientSessionModel {
 
-    class SearchableFields {
-        public static final SearchableModelField<AuthenticatedClientSessionModel> ID      = new SearchableModelField<>("id", String.class);
-        public static final SearchableModelField<AuthenticatedClientSessionModel> REALM_ID = new SearchableModelField<>("realmId", String.class);
-        public static final SearchableModelField<AuthenticatedClientSessionModel> CLIENT_ID = new SearchableModelField<>("clientId", String.class);
-        public static final SearchableModelField<AuthenticatedClientSessionModel> USER_SESSION_ID = new SearchableModelField<>("userSessionId", String.class);
-        public static final SearchableModelField<AuthenticatedClientSessionModel> IS_OFFLINE = new SearchableModelField<>("isOffline", Boolean.class);
-        public static final SearchableModelField<AuthenticatedClientSessionModel> TIMESTAMP  = new SearchableModelField<>("timestamp", Integer.class);
-    }
-
-    String STARTED_AT_NOTE = "startedAt";
+    final String STARTED_AT_NOTE = "startedAt";
+    final String USER_SESSION_STARTED_AT_NOTE = "userSessionStartedAt";
+    final String USER_SESSION_REMEMBER_ME_NOTE = "userSessionRememberMe";
 
     String getId();
 
@@ -47,7 +40,21 @@ public interface AuthenticatedClientSessionModel extends CommonClientSessionMode
         return started == null ? 0 : Integer.parseInt(started);
     }
 
+    default int getUserSessionStarted() {
+        String started = getNote(USER_SESSION_STARTED_AT_NOTE);
+        return started == null ? getUserSession().getStarted() : Integer.parseInt(started);
+    }
+
+    default boolean isUserSessionRememberMe() {
+        return Boolean.parseBoolean(getNote(USER_SESSION_REMEMBER_ME_NOTE));
+    }
+
     int getTimestamp();
+
+    /**
+     * Set the timestamp for the client session.
+     * If the timestamp is smaller or equal than the current timestamp, the operation is ignored.
+     */
     void setTimestamp(int timestamp);
 
     /**
@@ -66,4 +73,20 @@ public interface AuthenticatedClientSessionModel extends CommonClientSessionMode
     void setNote(String name, String value);
     void removeNote(String name);
     Map<String, String> getNotes();
+
+    default void restartClientSession() {
+        setAction(null);
+        setRedirectUri(null);
+        setCurrentRefreshToken(null);
+        setCurrentRefreshTokenUseCount(-1);
+        setTimestamp(Time.currentTime());
+        for (String note : getNotes().keySet()) {
+            if (!AuthenticatedClientSessionModel.USER_SESSION_STARTED_AT_NOTE.equals(note)
+                    && !AuthenticatedClientSessionModel.STARTED_AT_NOTE.equals(note)
+                    && !AuthenticatedClientSessionModel.USER_SESSION_REMEMBER_ME_NOTE.equals(note)) {
+                removeNote(note);
+            }
+        }
+        getNotes().put(AuthenticatedClientSessionModel.STARTED_AT_NOTE, String.valueOf(getTimestamp()));
+    }
 }

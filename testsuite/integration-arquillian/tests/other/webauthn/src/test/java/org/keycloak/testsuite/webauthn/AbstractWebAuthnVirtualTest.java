@@ -26,7 +26,6 @@ import org.keycloak.authentication.authenticators.browser.WebAuthnAuthenticatorF
 import org.keycloak.authentication.authenticators.browser.WebAuthnPasswordlessAuthenticatorFactory;
 import org.keycloak.authentication.requiredactions.WebAuthnPasswordlessRegisterFactory;
 import org.keycloak.authentication.requiredactions.WebAuthnRegisterFactory;
-import org.keycloak.common.Profile;
 import org.keycloak.common.util.SecretGenerator;
 import org.keycloak.models.credential.WebAuthnCredentialModel;
 import org.keycloak.representations.idm.AuthenticationExecutionExportRepresentation;
@@ -38,10 +37,10 @@ import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.AbstractAdminTest;
 import org.keycloak.testsuite.admin.ApiUtil;
-import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
-import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.pages.AppPage;
+import org.keycloak.testsuite.pages.InfoPage;
 import org.keycloak.testsuite.pages.LoginPage;
+import org.keycloak.testsuite.pages.LogoutConfirmPage;
 import org.keycloak.testsuite.pages.RegisterPage;
 import org.keycloak.testsuite.util.WaitUtils;
 import org.keycloak.testsuite.webauthn.authenticators.DefaultVirtualAuthOptions;
@@ -60,7 +59,7 @@ import org.openqa.selenium.firefox.FirefoxDriver;
 import org.openqa.selenium.virtualauthenticator.Credential;
 import org.openqa.selenium.virtualauthenticator.VirtualAuthenticatorOptions;
 
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Base64;
 import java.util.HashMap;
@@ -72,7 +71,6 @@ import java.util.Optional;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer.REMOTE;
 import static org.keycloak.testsuite.util.BrowserDriverUtil.isDriverFirefox;
 import static org.keycloak.testsuite.util.BrowserDriverUtil.isDriverInstanceOf;
 import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
@@ -82,7 +80,6 @@ import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
  *
  * @author <a href="mailto:mabartos@redhat.com">Martin Bartos</a>
  */
-@AuthServerContainerExclude(REMOTE)
 public abstract class AbstractWebAuthnVirtualTest extends AbstractTestRealmKeycloakTest implements UseVirtualAuthenticators {
 
     @Rule
@@ -105,6 +102,12 @@ public abstract class AbstractWebAuthnVirtualTest extends AbstractTestRealmKeycl
 
     @Page
     protected AppPage appPage;
+
+    @Page
+    protected LogoutConfirmPage logoutConfirmPage;
+
+    @Page
+    protected InfoPage infoPage;
 
     protected static final String ALL_ZERO_AAGUID = "00000000-0000-0000-0000-000000000000";
     protected static final String ALL_ONE_AAGUID = "11111111-1111-1111-1111-111111111111";
@@ -248,7 +251,7 @@ public abstract class AbstractWebAuthnVirtualTest extends AbstractTestRealmKeycl
     }
 
     /**
-     * Helper method for registering Security Key
+     * Helper method for registering Passkey
      * Sometimes, it's not possible to register the key, when the Resident Key is required
      * It seems it's related to Virtual authenticators provided by Selenium framework
      * Manual testing with Google Chrome authenticators works as expected
@@ -383,9 +386,11 @@ public abstract class AbstractWebAuthnVirtualTest extends AbstractTestRealmKeycl
     protected void logout() {
         try {
             waitForPageToLoad();
-            appPage.open();
-            appPage.assertCurrent();
-            appPage.logout();
+            String logoutUrl = oauth.getLogoutUrl().build();
+            driver.navigate().to(logoutUrl);
+            logoutConfirmPage.assertCurrent();
+            logoutConfirmPage.confirmLogout();
+            infoPage.assertCurrent();
             waitForPageToLoad();
         } catch (Exception e) {
             throw new RuntimeException("Cannot logout user", e);

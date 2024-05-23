@@ -27,22 +27,20 @@ import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.cookie.BasicClientCookie;
 import org.apache.http.util.EntityUtils;
 import org.jboss.arquillian.container.test.api.Deployment;
-import org.jboss.arquillian.drone.api.annotation.Drone;
 import org.jboss.arquillian.graphene.page.Page;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Rule;
+import org.junit.Before;
+import org.junit.After;
 import org.junit.Test;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.adapters.OIDCAuthenticationError;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.RealmResource;
-import org.keycloak.common.Profile;
 import org.keycloak.common.util.Time;
 import org.keycloak.constants.AdapterConstants;
 import org.keycloak.events.Details;
-import org.keycloak.events.EventType;
 import org.keycloak.models.utils.SessionTimeoutHelper;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.OIDCLoginProtocolService;
@@ -52,7 +50,6 @@ import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.ProfileAssume;
 import org.keycloak.testsuite.adapter.AbstractServletsAdapterTest;
 import org.keycloak.testsuite.adapter.filter.AdapterActionsFilter;
 import org.keycloak.testsuite.adapter.page.BasicAuth;
@@ -76,36 +73,35 @@ import org.keycloak.testsuite.adapter.page.TokenMinTTLPage;
 import org.keycloak.testsuite.adapter.page.TokenRefreshPage;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.arquillian.annotation.AppServerContainer;
-import org.keycloak.testsuite.arquillian.annotation.DisableFeature;
+import org.keycloak.testsuite.pages.InfoPage;
+import org.keycloak.testsuite.pages.LogoutConfirmPage;
 import org.keycloak.testsuite.util.ServerURLs;
 import org.keycloak.testsuite.utils.arquillian.ContainerConstants;
-import org.keycloak.testsuite.auth.page.account.Applications;
 import org.keycloak.testsuite.auth.page.login.OAuthGrant;
-import org.keycloak.testsuite.auth.page.login.OIDCLogin;
 import org.keycloak.testsuite.console.page.events.Config;
 import org.keycloak.testsuite.console.page.events.LoginEvents;
 import org.keycloak.testsuite.page.AbstractPageWithInjectedUrl;
-import org.keycloak.testsuite.util.JavascriptBrowser;
 import org.keycloak.testsuite.util.Matchers;
 import org.keycloak.testsuite.util.URLUtils;
 import org.keycloak.testsuite.util.WaitUtils;
+import org.keycloak.testsuite.util.AccountHelper;
 import org.keycloak.util.BasicAuthHelper;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Cookie;
-import org.openqa.selenium.WebDriver;
 
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.client.WebTarget;
-import javax.ws.rs.core.Form;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.Response.Status;
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.client.WebTarget;
+import jakarta.ws.rs.core.Form;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
+import jakarta.ws.rs.core.UriBuilder;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -127,7 +123,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.keycloak.testsuite.auth.page.AuthRealm.DEMO;
 import static org.keycloak.testsuite.util.AdminClientUtil.NUMBER_OF_CONNECTIONS;
@@ -142,24 +138,13 @@ import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
  * @author tkyjovsk
  */
 @AppServerContainer(ContainerConstants.APP_SERVER_UNDERTOW)
-@AppServerContainer(ContainerConstants.APP_SERVER_WILDFLY)
-@AppServerContainer(ContainerConstants.APP_SERVER_WILDFLY_DEPRECATED)
-@AppServerContainer(ContainerConstants.APP_SERVER_EAP)
-@AppServerContainer(ContainerConstants.APP_SERVER_EAP6)
-@AppServerContainer(ContainerConstants.APP_SERVER_EAP71)
-@AppServerContainer(ContainerConstants.APP_SERVER_TOMCAT8)
-@AppServerContainer(ContainerConstants.APP_SERVER_TOMCAT9)
-@DisableFeature(value = Profile.Feature.ACCOUNT2, skipRestart = true) // TODO remove this (KEYCLOAK-16228)
 public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
 
-    // Javascript browser needed KEYCLOAK-4703
-    @Drone
-    @JavascriptBrowser
-    protected WebDriver jsDriver;
+    @Page
+    protected LogoutConfirmPage logoutConfirmPage;
 
     @Page
-    @JavascriptBrowser
-    protected OIDCLogin jsDriverTestRealmLoginPage;
+    protected InfoPage infoPage;
 
     @Page
     protected CustomerPortal customerPortal;
@@ -189,8 +174,6 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
     private TokenRefreshPage tokenRefreshPage;
     @Page
     private OAuthGrant oAuthGrantPage;
-    @Page
-    protected Applications applicationsPage;
     @Page
     protected LoginEvents loginEventsPage;
     @Page
@@ -226,7 +209,7 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
 
     @Deployment(name = SecurePortal.DEPLOYMENT_NAME)
     protected static WebArchive securePortal() {
-        return servletDeployment(SecurePortal.DEPLOYMENT_NAME, CallAuthenticatedServlet.class);
+        return servletDeployment(SecurePortal.DEPLOYMENT_NAME,  AdapterActionsFilter.class, CallAuthenticatedServlet.class);
     }
     @Deployment(name = SecurePortalRewriteRedirectUri.DEPLOYMENT_NAME)
     protected static WebArchive securePortalRewriteRedirectUri() {
@@ -309,7 +292,6 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         super.setDefaultPageUriParameters();
         configPage.setConsoleRealm(DEMO);
         loginEventsPage.setConsoleRealm(DEMO);
-        applicationsPage.setAuthRealm(DEMO);
         loginEventsPage.setConsoleRealm(DEMO);
         oAuthGrantPage.setAuthRealm(DEMO);
     }
@@ -319,6 +301,16 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         // Delete all cookies from token-min-ttl page to be sure we are logged out
         tokenMinTTLPage.navigateTo();
         driver.manage().deleteAllCookies();
+
+        // set demo realm name for all tests
+        oauth.realm(testRealmResource().toRepresentation().getRealm());
+        createAppClientInRealm(testRealmResource().toRepresentation().getRealm());
+    }
+
+    @After
+    public void afterDemoServletsAdapterTest() {
+        // restore test realm
+        oauth.realm("test");
     }
     
     //KEYCLOAK-702
@@ -461,10 +453,9 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         waitForPageToLoad();
         assertPageContains("parameter=hello");
 
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, customerPortal.toString())
-                .build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+        driver.navigate().to(oauth.getLoginFormUrl());
+
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
         productPortal.navigateTo();
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
@@ -517,9 +508,9 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         assertEquals(1, Integer.parseInt(productPortalStats.get("active")));
 
         // test logout
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, customerPortal.toString()).build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+        driver.navigate().to(oauth.getLoginFormUrl());
+
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
         productPortal.navigateTo();
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
@@ -711,9 +702,8 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         assertCurrentUrlEquals(securePortal);
         assertLogged();
         // test logout
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, securePortal.toString()).build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+        driver.navigate().to(oauth.getLoginFormUrl());
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
         securePortal.navigateTo();
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
@@ -731,9 +721,8 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
 
         assertLogged();
         // test logout
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, securePortalWithCustomSessionConfig.toString()).build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+        driver.navigate().to(oauth.getLoginFormUrl());
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
         securePortalWithCustomSessionConfig.navigateTo();
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
@@ -760,13 +749,13 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
 
         // Get time of token
         AccessToken token = tokenMinTTLPage.getAccessToken();
-        int tokenIssued1 = token.getIssuedAt();
+        long tokenIssued1 = token.getIat();
 
         // Sets 5 minutes offset and assert access token will be still the same
         setAdapterAndServerTimeOffset(300, tokenMinTTLPage.toString());
         tokenMinTTLPage.navigateTo();
         token = tokenMinTTLPage.getAccessToken();
-        int tokenIssued2 = token.getIssuedAt();
+        long tokenIssued2 = token.getIat();
         Assert.assertEquals(tokenIssued1, tokenIssued2);
         assertFalse(token.isExpired());
 
@@ -774,7 +763,7 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         setAdapterAndServerTimeOffset(540, tokenMinTTLPage.toString());
         tokenMinTTLPage.navigateTo();
         token = tokenMinTTLPage.getAccessToken();
-        int tokenIssued3 = token.getIssuedAt();
+        long tokenIssued3 = token.getIat();
         Assert.assertTrue(tokenIssued3 > tokenIssued1);
 
         // Revert times
@@ -858,8 +847,8 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
             testRealmLoginPage.form().setPassword("password");
             testRealmLoginPage.form().login();
             AccessToken token = tokenMinTTLPage.getAccessToken();
-            int authTime = token.getAuthTime();
-            assertThat(authTime, is(greaterThanOrEqualTo(currentTime + 10)));
+            long authTime = token.getAuth_time();
+            assertThat(authTime, is(greaterThanOrEqualTo(currentTime + 10L)));
         } finally {
             setAdapterAndServerTimeOffset(0, securePortal.toString());
         }
@@ -867,7 +856,7 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
 
     private static Map<String, String> getQueryFromUrl(String url) {
         try {
-            return URLEncodedUtils.parse(new URI(url), "UTF-8").stream()
+            return URLEncodedUtils.parse(new URI(url), StandardCharsets.UTF_8).stream()
                 .collect(Collectors.toMap(p -> p.getName(), p -> p.getValue()));
         } catch (URISyntaxException e) {
             return null;
@@ -876,8 +865,6 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
 
     @Test
     public void testOIDCUiLocalesParamForwarding() {
-        ProfileAssume.assumeCommunity();
-
         RealmRepresentation demoRealmRep = testRealmResource().toRepresentation();
         boolean enabled = demoRealmRep.isInternationalizationEnabled();
         String defaultLocale = demoRealmRep.getDefaultLocale();
@@ -909,9 +896,9 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
             assertCurrentUrlEquals(portalUri);
             assertLogged();
             // logout
-            String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                    .queryParam(OAuth2Constants.REDIRECT_URI, securePortal.toString()).build("demo").toString();
-            driver.navigate().to(logoutUri);
+            AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+            driver.navigate().to(oauth.getLoginFormUrl());
+
             assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
             securePortal.navigateTo();
             assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
@@ -943,9 +930,9 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         Assert.assertTrue(pageSource.contains("Service returned: 401"));
         Assert.assertFalse(pageSource.contains("Stian Thorgersen"));
 
-        // Logout TODO: will be good to not request logout to force adapter to use additional scope (and other request parameters)
-        driver.navigate().to(customerPortal.logout().toURL());
-        waitForPageToLoad();
+        // Logout
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+        driver.navigate().to(oauth.getLoginFormUrl());
 
         // Login with requested audience
         driver.navigate().to(customerPortal.callCustomerDbAudienceRequiredUrl(true).toURL());
@@ -959,9 +946,8 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         assertLogged();
 
         // logout
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, customerPortal.toString()).build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+        driver.navigate().to(oauth.getLoginFormUrl());
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
     }
 
@@ -1039,19 +1025,13 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
                 .removeDetail(Details.CODE_ID)
                 .assertEvent();
 
-        applicationsPage.navigateTo();
-        applicationsPage.revokeGrantForApplication("customer-portal");
+        AccountHelper.revokeConsents(testRealmResource(), "bburke@redhat.com", "customer-portal");
 
         customerPortal.navigateTo();
 
         assertTrue(oAuthGrantPage.isCurrent());
 
-        assertEvents.expect(EventType.REVOKE_GRANT)
-                .realm(realm.getId())
-                .client("account")
-                .user(userId)
-                .detail(Details.REVOKED_CLIENT, "customer-portal")
-                .assertEvent();
+        Assert.assertTrue(AccountHelper.getUserConsents(testRealmResource(), "bburke@redhat.com").isEmpty());
 
         assertEvents.assertEmpty();
 
@@ -1099,16 +1079,25 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
                 .assertEvent();
 
 
-        driver.navigate().to(testRealmPage.getOIDCLogoutUrl() + "?redirect_uri=" + customerPortal);
+
+        String logoutUrl = oauth.realm("demo")
+                .getLogoutUrl()
+                .build();
+        driver.navigate().to(logoutUrl);
+
+        logoutConfirmPage.assertCurrent();
+        logoutConfirmPage.confirmLogout();
+        infoPage.assertCurrent();
+        driver.navigate().to(customerPortal.toString());
+
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
 
         assertEvents.expectLogout(null)
                 .realm(realm.getId())
                 .user(userId)
+                .client("account")
                 .session(AssertEvents.isUUID())
-                .detail(Details.REDIRECT_URI,
-                        org.hamcrest.Matchers.anyOf(org.hamcrest.Matchers.equalTo(customerPortal.getInjectedUrl().toString()),
-                                org.hamcrest.Matchers.equalTo(customerPortal.getInjectedUrl().toString() + "/")))
+                .removeDetail(Details.REDIRECT_URI)
                 .assertEvent();
 
         assertEvents.assertEmpty();
@@ -1116,7 +1105,7 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         String serverLogPath = null;
 
         String appServer = System.getProperty("app.server");
-        if (appServer != null && (appServer.equals("wildfly") || appServer.equals("eap6") || appServer.equals("eap"))) {
+        if (appServer != null && (appServer.equals("wildfly") || appServer.equals("eap"))) {
             serverLogPath = System.getProperty("app.server.home") + "/standalone-test/log/server.log";
         }
 
@@ -1160,10 +1149,8 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         assertPageContains("uriEncodeTest=false");
         
         // test logout
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, customerPortal.toString())
-                .build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
+        driver.navigate().to(oauth.getLoginFormUrl());
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
         productPortal.navigateTo();
         assertCurrentUrlStartsWithLoginUrlOf(testRealmPage);
@@ -1206,19 +1193,19 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         // Redirect client to login page if it's not an XHR
         response = target.request().header("X-Requested-With", "Dont-Know").header(HttpHeaders.ACCEPT, "*/*").get();
         Assert.assertEquals(302, response.getStatus());
-        Assert.assertThat(response.getHeaderString(HttpHeaders.LOCATION), containsString("response_type=code"));
+        assertThat(response.getHeaderString(HttpHeaders.LOCATION), containsString("response_type=code"));
         response.close();
 
         // Redirect client to login page if client explicitely understands HTML responses
         response = target.request().header(HttpHeaders.ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9").get();
         Assert.assertEquals(302, response.getStatus());
-        Assert.assertThat(response.getHeaderString(HttpHeaders.LOCATION), containsString("response_type=code"));
+        assertThat(response.getHeaderString(HttpHeaders.LOCATION), containsString("response_type=code"));
         response.close();
 
         // Redirect client to login page if client understands all response types
         response = target.request().header(HttpHeaders.ACCEPT, "*/*").get();
         Assert.assertEquals(302, response.getStatus());
-        Assert.assertThat(response.getHeaderString(HttpHeaders.LOCATION), containsString("response_type=code"));
+        assertThat(response.getHeaderString(HttpHeaders.LOCATION), containsString("response_type=code"));
         response.close();
         client.close();
     }
@@ -1320,9 +1307,7 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         expectResultOfClientAuthenticatedInClientSecretJwt(targetClientId, clientSecretJwtSecurePortal);
 
         // test logout
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, clientSecretJwtSecurePortal.toString()).build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
     }
 
     @Test
@@ -1362,9 +1347,7 @@ public class DemoServletsAdapterTest extends AbstractServletsAdapterTest {
         expectResultOfClientAuthenticatedInClientSecretJwt(targetClientId, clientSecretJwtSecurePortalValidAlg);
 
         // test logout
-        String logoutUri = OIDCLoginProtocolService.logoutUrl(authServerPage.createUriBuilder())
-                .queryParam(OAuth2Constants.REDIRECT_URI, clientSecretJwtSecurePortalValidAlg.toString()).build("demo").toString();
-        driver.navigate().to(logoutUri);
+        AccountHelper.logout(testRealmResource(), "bburke@redhat.com");
     }
 
     @Test

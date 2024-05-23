@@ -19,16 +19,15 @@ package org.keycloak.testsuite.admin.authentication;
 
 import org.junit.Assert;
 import org.junit.Test;
-import org.keycloak.common.Profile;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.representations.idm.RequiredActionProviderRepresentation;
 import org.keycloak.representations.idm.RequiredActionProviderSimpleRepresentation;
 import org.keycloak.testsuite.actions.DummyRequiredActionFactory;
-import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.util.AdminEventPaths;
 
-import javax.ws.rs.NotFoundException;
+import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.NotFoundException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -41,24 +40,34 @@ import java.util.Map;
  */
 public class RequiredActionsTest extends AbstractAuthenticationTest {
 
+    @Override
+    protected boolean removeVerifyProfileAtImport() {
+        // do not remove verify profile action for this test
+        return false;
+    }
+
     @Test
     public void testRequiredActions() {
         List<RequiredActionProviderRepresentation> result = authMgmtResource.getRequiredActions();
 
         List<RequiredActionProviderRepresentation> expected = new ArrayList<>();
         addRequiredAction(expected, "CONFIGURE_TOTP", "Configure OTP", true, false, null);
+        addRequiredAction(expected, "TERMS_AND_CONDITIONS", "Terms and Conditions", false, false, null);
         addRequiredAction(expected, "UPDATE_PASSWORD", "Update Password", true, false, null);
         addRequiredAction(expected, "UPDATE_PROFILE", "Update Profile", true, false, null);
         addRequiredAction(expected, "VERIFY_EMAIL", "Verify Email", true, false, null);
+        addRequiredAction(expected, "VERIFY_PROFILE", "Verify Profile", true, false, null);
         addRequiredAction(expected, "delete_account", "Delete Account", false, false, null);
-        addRequiredAction(expected, "terms_and_conditions", "Terms and Conditions", false, false, null);
+        addRequiredAction(expected, "delete_credential", "Delete Credential", true, false, null);
         addRequiredAction(expected, "update_user_locale", "Update User Locale", true, false, null);
+        addRequiredAction(expected, "webauthn-register", "Webauthn Register", true, false, null);
+        addRequiredAction(expected, "webauthn-register-passwordless", "Webauthn Register Passwordless", true, false, null);
 
         compareRequiredActions(expected, sort(result));
 
         RequiredActionProviderRepresentation forUpdate = newRequiredAction("VERIFY_EMAIL", "Verify Email", false, false, null);
         authMgmtResource.updateRequiredAction(forUpdate.getAlias(), forUpdate);
-        assertAdminEvents.assertEvent(REALM_NAME, OperationType.UPDATE, AdminEventPaths.authRequiredActionPath(forUpdate.getAlias()), ResourceType.REQUIRED_ACTION);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.UPDATE, AdminEventPaths.authRequiredActionPath(forUpdate.getAlias()), ResourceType.REQUIRED_ACTION);
 
         result = authMgmtResource.getRequiredActions();
         RequiredActionProviderRepresentation updated = findRequiredActionByAlias(forUpdate.getAlias(), result);
@@ -68,7 +77,7 @@ public class RequiredActionsTest extends AbstractAuthenticationTest {
 
         forUpdate.setConfig(Collections.<String, String>emptyMap());
         authMgmtResource.updateRequiredAction(forUpdate.getAlias(), forUpdate);
-        assertAdminEvents.assertEvent(REALM_NAME, OperationType.UPDATE, AdminEventPaths.authRequiredActionPath(forUpdate.getAlias()), ResourceType.REQUIRED_ACTION);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.UPDATE, AdminEventPaths.authRequiredActionPath(forUpdate.getAlias()), ResourceType.REQUIRED_ACTION);
 
         result = authMgmtResource.getRequiredActions();
         updated = findRequiredActionByAlias(forUpdate.getAlias(), result);
@@ -83,7 +92,7 @@ public class RequiredActionsTest extends AbstractAuthenticationTest {
 
         // Dummy RequiredAction is not registered in the realm and WebAuthn actions
         List<RequiredActionProviderSimpleRepresentation> result = authMgmtResource.getUnregisteredRequiredActions();
-        Assert.assertEquals(4, result.size());
+        Assert.assertEquals(1, result.size());
         RequiredActionProviderSimpleRepresentation action = result.stream().filter(
                 a -> a.getProviderId().equals(DummyRequiredActionFactory.PROVIDER_ID)
         ).findFirst().get();
@@ -92,7 +101,25 @@ public class RequiredActionsTest extends AbstractAuthenticationTest {
 
         // Register it
         authMgmtResource.registerRequiredAction(action);
-        assertAdminEvents.assertEvent(REALM_NAME, OperationType.CREATE, AdminEventPaths.authMgmtBasePath() + "/register-required-action", action, ResourceType.REQUIRED_ACTION);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authMgmtBasePath() + "/register-required-action", action, ResourceType.REQUIRED_ACTION);
+
+        // Try to register 2nd time
+        try {
+            authMgmtResource.registerRequiredAction(action);
+        } catch (ClientErrorException ex) {
+            // Expected
+        }
+
+        // Try to register required action with fake providerId
+        RequiredActionProviderSimpleRepresentation requiredAction = new RequiredActionProviderSimpleRepresentation();
+        requiredAction.setName("not-existent");
+        requiredAction.setProviderId("not-existent");
+        try {
+            authMgmtResource.registerRequiredAction(requiredAction);
+            Assert.fail("Didn't expect to register requiredAction with providerId: 'not-existent'");
+        } catch (Exception ex) {
+            // Expected
+        }
 
         // Try to find not-existent action - should fail
         try {
@@ -121,7 +148,7 @@ public class RequiredActionsTest extends AbstractAuthenticationTest {
         // Update (set it as defaultAction)
         rep.setDefaultAction(true);
         authMgmtResource.updateRequiredAction(DummyRequiredActionFactory.PROVIDER_ID, rep);
-        assertAdminEvents.assertEvent(REALM_NAME, OperationType.UPDATE, AdminEventPaths.authRequiredActionPath(rep.getAlias()), rep, ResourceType.REQUIRED_ACTION);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.UPDATE, AdminEventPaths.authRequiredActionPath(rep.getAlias()), rep, ResourceType.REQUIRED_ACTION);
         compareRequiredAction(rep, newRequiredAction(DummyRequiredActionFactory.PROVIDER_ID, "Dummy Action",
                 true, true, Collections.<String, String>emptyMap()));
 
@@ -135,7 +162,7 @@ public class RequiredActionsTest extends AbstractAuthenticationTest {
 
         // Remove success
         authMgmtResource.removeRequiredAction(DummyRequiredActionFactory.PROVIDER_ID);
-        assertAdminEvents.assertEvent(REALM_NAME, OperationType.DELETE, AdminEventPaths.authRequiredActionPath(rep.getAlias()), ResourceType.REQUIRED_ACTION);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.DELETE, AdminEventPaths.authRequiredActionPath(rep.getAlias()), ResourceType.REQUIRED_ACTION);
 
     }
 

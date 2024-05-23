@@ -1,44 +1,65 @@
 package org.keycloak.quarkus.runtime.configuration.mappers;
 
-import java.util.ArrayList;
-import java.util.List;
 import org.keycloak.common.Profile;
+import org.keycloak.common.Profile.Feature;
+import org.keycloak.config.FeatureOptions;
+import org.keycloak.quarkus.runtime.cli.PropertyException;
 
-final class FeaturePropertyMappers {
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import static org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper.fromOption;
+
+public final class FeaturePropertyMappers {
+
+    private static final Pattern VERSIONED_PATTERN = Pattern.compile("([^:]+):v(\\d+)");
 
     private FeaturePropertyMappers() {
     }
 
-    public static PropertyMapper[] getMappers() {
+    public static PropertyMapper<?>[] getMappers() {
         return new PropertyMapper[] {
-                builder()
-                        .from("features")
-                        .description("Enables a set of one or more features.")
-                        .expectedValues(getFeatureValues())
+                fromOption(FeatureOptions.FEATURES)
                         .paramLabel("feature")
+                        .validator((mapper, value) -> mapper.validateExpectedValues(value,
+                                (c, v) -> validateEnabledFeature(v)))
                         .build(),
-                builder()
-                        .from("features-disabled")
-                        .expectedValues(getFeatureValues())
+                fromOption(FeatureOptions.FEATURES_DISABLED)
                         .paramLabel("feature")
-                        .description("Disables a set of one or more features.")
                         .build()
         };
     }
 
-    private static List<String> getFeatureValues() {
-        List<String> features = new ArrayList<>();
-
-        for (Profile.Feature value : Profile.Feature.values()) {
-            features.add(value.name().toLowerCase().replace('_', '-'));
+    public static void validateEnabledFeature(String feature) {
+        if (!Profile.getFeatureVersions(feature).isEmpty()) {
+            return;
         }
-
-        features.add(Profile.Type.PREVIEW.name().toLowerCase());
-
-        return features;
-    }
-
-    private static PropertyMapper.Builder builder() {
-        return PropertyMapper.builder(ConfigCategory.FEATURE).isBuildTimeProperty(true);
+        if (feature.equals(Profile.Feature.Type.PREVIEW.name().toLowerCase())) {
+            return;
+        }
+        Matcher matcher = VERSIONED_PATTERN.matcher(feature);
+        if (!matcher.matches()) {
+            if (feature.contains(":")) {
+                throw new PropertyException(String.format(
+                        "%s has an invalid format for enabling a feature, expected format is feature:v{version}, e.g. docker:v1",
+                        feature));
+            }
+            throw new PropertyException(String.format("%s is an unrecognized feature, it should be one of %s", feature,
+                    FeatureOptions.getFeatureValues(false)));
+        }
+        String unversionedFeature = matcher.group(1);
+        Set<Feature> featureVersions = Profile.getFeatureVersions(unversionedFeature);
+        if (featureVersions.isEmpty()) {
+            throw new PropertyException(String.format("%s has an unrecognized feature, it should be one of %s",
+                    feature, FeatureOptions.getFeatureValues(false)));
+        }
+        int version = Integer.parseInt(matcher.group(2));
+        if (!featureVersions.stream().anyMatch(f -> f.getVersion() == version)) {
+            throw new PropertyException(
+                    String.format("%s has an unrecognized feature version, it should be one of %s", feature,
+                            featureVersions.stream().map(Feature::getVersion).map(String::valueOf).collect(Collectors.toList())));
+        }
     }
 }

@@ -18,17 +18,16 @@
 package org.keycloak.testsuite.webauthn.account;
 
 import org.hamcrest.Matchers;
-import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Test;
+import org.junit.Ignore;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.authentication.requiredactions.WebAuthnPasswordlessRegisterFactory;
 import org.keycloak.authentication.requiredactions.WebAuthnRegisterFactory;
 import org.keycloak.models.credential.WebAuthnCredentialModel;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RequiredActionProviderRepresentation;
-import org.keycloak.testsuite.ui.account2.page.SigningInPage;
+import org.keycloak.testsuite.webauthn.pages.SigningInPage;
 import org.keycloak.testsuite.webauthn.pages.WebAuthnAuthenticatorsList;
-import org.keycloak.testsuite.webauthn.pages.WebAuthnLoginPage;
 import org.keycloak.theme.DateTimeFormatterUtil;
 
 import java.io.Closeable;
@@ -50,8 +49,8 @@ import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.hasSize;
-import static org.keycloak.testsuite.ui.account2.page.utils.SigningInPageUtils.assertUserCredential;
-import static org.keycloak.testsuite.ui.account2.page.utils.SigningInPageUtils.testSetUpLink;
+import static org.keycloak.testsuite.webauthn.utils.SigningInPageUtils.assertUserCredential;
+import static org.keycloak.testsuite.webauthn.utils.SigningInPageUtils.testSetUpLink;
 import static org.keycloak.testsuite.util.UIUtils.refreshPageAndWaitForLoad;
 import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
 
@@ -62,8 +61,8 @@ public class WebAuthnSigningInTest extends AbstractWebAuthnAccountTest {
         testContext.setTestRealmReps(emptyList()); // reimport realm after this test
 
         assertThat(signingInPage.getCategoriesCount(), is(3));
-        assertThat(signingInPage.getCategoryTitle("basic-authentication"), is("Basic Authentication"));
-        assertThat(signingInPage.getCategoryTitle("two-factor"), is("Two-Factor Authentication"));
+        assertThat(signingInPage.getCategoryTitle("basic-authentication"), is("Basic authentication"));
+        assertThat(signingInPage.getCategoryTitle("two-factor"), is("Two-factor authentication"));
         assertThat(signingInPage.getCategoryTitle("passwordless"), is("Passwordless"));
 
         // Delete WebAuthn flow ==> Passwordless category should disappear
@@ -260,6 +259,7 @@ public class WebAuthnSigningInTest extends AbstractWebAuthnAccountTest {
     }
 
     @Test
+    @Ignore // TODO: Enable once chromedriver version 113.0.5672.92 is available in https://chromedriver.storage.googleapis.com/
     public void checkAuthenticatorTimeLocale() throws ParseException, IOException {
         addWebAuthnCredential("authenticator#1");
 
@@ -407,11 +407,11 @@ public class WebAuthnSigningInTest extends AbstractWebAuthnAccountTest {
 
         if (passwordless) {
             credentialType = webAuthnPwdlessCredentialType;
-            expectedHelpText = "Use your security key for passwordless sign in.";
+            expectedHelpText = "Use your Passkey for passwordless sign in.";
             providerId = WebAuthnPasswordlessRegisterFactory.PROVIDER_ID;
         } else {
             credentialType = webAuthnCredentialType;
-            expectedHelpText = "Use your security key to sign in.";
+            expectedHelpText = "Use your Passkey to sign in.";
             providerId = WebAuthnRegisterFactory.PROVIDER_ID;
         }
 
@@ -419,7 +419,7 @@ public class WebAuthnSigningInTest extends AbstractWebAuthnAccountTest {
         // no way to simulate registration cancellation
 
         assertThat("Set up link for \"" + credentialType.getType() + "\" is not visible", credentialType.isSetUpLinkVisible(), is(true));
-        assertThat(credentialType.getTitle(), is("Security Key"));
+        assertThat(credentialType.getTitle(), is("Passkey"));
         assertThat(credentialType.getHelpText(), is(expectedHelpText));
 
         final String label1 = "WebAuthn is convenient";

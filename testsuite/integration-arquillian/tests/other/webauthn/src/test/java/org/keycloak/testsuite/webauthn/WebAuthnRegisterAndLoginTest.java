@@ -145,10 +145,13 @@ public class WebAuthnRegisterAndLoginTest extends AbstractWebAuthnVirtualTest {
             events.clear();
 
             // logout by user
-            appPage.logout();
+            logout();
+
             // confirm logout event
             events.expectLogout(sessionId)
+                    .removeDetail(Details.REDIRECT_URI)
                     .user(userId)
+                    .client("account")
                     .assertEvent();
 
             // login by user
@@ -176,9 +179,12 @@ public class WebAuthnRegisterAndLoginTest extends AbstractWebAuthnVirtualTest {
 
             events.clear();
             // logout by user
-            appPage.logout();
+            logout();
+
             // confirm logout event
             events.expectLogout(sessionId)
+                    .removeDetail(Details.REDIRECT_URI)
+                    .client("account")
                     .user(userId)
                     .assertEvent();
         } finally {
@@ -248,13 +254,15 @@ public class WebAuthnRegisterAndLoginTest extends AbstractWebAuthnVirtualTest {
 
             events.clear();
 
-            appPage.logout();
+            logout();
 
             events.expectLogout(sessionID)
+                    .removeDetail(Details.REDIRECT_URI)
                     .user(userId)
+                    .client("account")
                     .assertEvent();
 
-            // Password + WebAuthn security key
+            // Password + WebAuthn Passkey
             loginUsernamePage.open();
             loginUsernamePage.assertCurrent();
             loginUsernamePage.login("test-user@localhost");
@@ -271,7 +279,7 @@ public class WebAuthnRegisterAndLoginTest extends AbstractWebAuthnVirtualTest {
             webAuthnLoginPage.clickAuthenticate();
 
             appPage.assertCurrent();
-            appPage.logout();
+            logout();
 
             // Only passwordless login
             loginUsernamePage.open();
@@ -283,7 +291,7 @@ public class WebAuthnRegisterAndLoginTest extends AbstractWebAuthnVirtualTest {
 
             selectAuthenticatorPage.assertCurrent();
             assertThat(selectAuthenticatorPage.getLoginMethodHelpText(SelectAuthenticatorPage.SECURITY_KEY),
-                    is("Use your security key for passwordless sign in."));
+                    is("Use your Passkey for passwordless sign in."));
             selectAuthenticatorPage.selectLoginMethod(SelectAuthenticatorPage.SECURITY_KEY);
 
             webAuthnLoginPage.assertCurrent();
@@ -292,7 +300,7 @@ public class WebAuthnRegisterAndLoginTest extends AbstractWebAuthnVirtualTest {
             webAuthnLoginPage.clickAuthenticate();
 
             appPage.assertCurrent();
-            appPage.logout();
+            logout();
         } finally {
             removeFirstCredentialForUser(userId, WebAuthnCredentialModel.TYPE_TWOFACTOR, WEBAUTHN_LABEL);
             removeFirstCredentialForUser(userId, WebAuthnCredentialModel.TYPE_PASSWORDLESS, PASSWORDLESS_LABEL);

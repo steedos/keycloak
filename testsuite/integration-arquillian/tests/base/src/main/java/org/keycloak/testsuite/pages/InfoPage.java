@@ -40,6 +40,12 @@ public class InfoPage extends LanguageComboboxAwarePage {
     @FindBy(linkText = "» Klicken Sie hier um fortzufahren")
     private WebElement clickToContinueDe;
 
+    @FindBy(linkText = "» Click here to proceed")
+    private WebElement clickToContinue;
+
+    @FindBy(linkText = "« Zpět na aplikaci")
+    private WebElement backToApplicationCs;
+
     public String getInfo() {
         return infoMessage.getText();
     }
@@ -60,6 +66,14 @@ public class InfoPage extends LanguageComboboxAwarePage {
 
     public void clickToContinueDe() {
         clickToContinueDe.click();
+    }
+
+    public void clickToContinue() {
+        clickToContinue.click();
+    }
+
+    public void clickBackToApplicationLinkCs() {
+        backToApplicationCs.click();
     }
 
 }

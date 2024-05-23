@@ -1,170 +1,214 @@
 package org.keycloak.quarkus.runtime.configuration.mappers;
 
-import static org.keycloak.quarkus.runtime.integration.QuarkusPlatform.addInitializationException;
+import static java.util.Optional.of;
+import static org.keycloak.config.LoggingOptions.GELF_ACTIVATED;
+import static org.keycloak.quarkus.runtime.configuration.Configuration.isTrue;
+import static org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper.fromOption;
 
 import java.io.File;
-import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.logging.Level;
+import java.util.stream.Stream;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.jboss.logmanager.LogContext;
+import org.keycloak.config.LoggingOptions;
 import org.keycloak.quarkus.runtime.Messages;
+import org.keycloak.quarkus.runtime.cli.PropertyException;
 
 import io.smallrye.config.ConfigSourceInterceptorContext;
 
 public final class LoggingPropertyMappers {
 
-    private static final String DEFAULT_LOG_LEVEL = "info";
-    private static final String DEFAULT_LOG_HANDLER = "console";
-    private static final String DEFAULT_LOG_FILENAME = "keycloak.log";
-    public static final String DEFAULT_LOG_PATH = "data" + File.separator + "log" + File.separator + DEFAULT_LOG_FILENAME;
-    private static final List<String> AVAILABLE_LOG_HANDLERS = List.of(DEFAULT_LOG_HANDLER,"file");
-    private static final String DEFAULT_CONSOLE_OUTPUT = "default";
+    private static final String CONSOLE_ENABLED_MSG = "Console log handler is activated";
+    private static final String FILE_ENABLED_MSG = "File log handler is activated";
+    private static final String SYSLOG_ENABLED_MSG = "Syslog is activated";
+    private static final String GELF_ENABLED_MSG = "GELF is activated";
 
-    private LoggingPropertyMappers(){}
+    private LoggingPropertyMappers() {
+    }
 
-    public static PropertyMapper[] getMappers() {
-        return new PropertyMapper[] {
-                builder().from("log")
-                        .defaultValue(DEFAULT_LOG_HANDLER)
-                        .description("Enable one or more log handlers in a comma-separated list. Available log handlers are: " + String.join(",", AVAILABLE_LOG_HANDLERS))
+    public static PropertyMapper<?>[] getMappers() {
+        PropertyMapper<?>[] defaultMappers = new PropertyMapper[]{
+                fromOption(LoggingOptions.LOG)
                         .paramLabel("<handler>")
-                        .expectedValues("console","file","console,file","file,console")
                         .build(),
-                builder().from("log-level")
-                        .to("quarkus.log.level")
-                        .transformer(new BiFunction<String, ConfigSourceInterceptorContext, String>() {
-                            @Override
-                            public String apply(String value, ConfigSourceInterceptorContext configSourceInterceptorContext) {
-                                String rootLevel = DEFAULT_LOG_LEVEL;
-
-                                for (String level : value.split(",")) {
-                                    String[] parts = level.split(":");
-                                    String category = null;
-                                    String categoryLevel;
-
-                                    if (parts.length == 1) {
-                                        categoryLevel = parts[0];
-                                    } else if (parts.length == 2) {
-                                        category = parts[0];
-                                        categoryLevel = parts[1];
-                                    } else {
-                                        addInitializationException(Messages.invalidLogCategoryFormat(level));
-                                        return rootLevel;
-                                    }
-
-                                    Level levelType;
-
-                                    try {
-                                        levelType = toLevel(categoryLevel);
-                                    } catch (IllegalArgumentException iae) {
-                                        addInitializationException(Messages.invalidLogLevel(categoryLevel));
-                                        return rootLevel;
-                                    }
-
-                                    if (category == null) {
-                                        rootLevel = levelType.getName();
-                                    } else {
-                                        setCategoryLevel(category, levelType.getName());
-                                    }
-                                }
-
-                                return rootLevel;
-                            }
-                        })
-                        .defaultValue(DEFAULT_LOG_LEVEL)
-                        .description("The log level of the root category or a comma-separated list of individual categories and their levels. For the root category, you don't need to specify a category.")
-                        .paramLabel("category:level")
-                        .build(),
-                builder().from("log-console-output")
+                // Console
+                fromOption(LoggingOptions.LOG_CONSOLE_OUTPUT)
+                        .isEnabled(LoggingPropertyMappers::isConsoleEnabled, CONSOLE_ENABLED_MSG)
                         .to("quarkus.log.console.json")
-                        .defaultValue(DEFAULT_CONSOLE_OUTPUT)
-                        .description("Set the log output to JSON or default (plain) unstructured logging.")
-                        .paramLabel("default|json")
-                        .expectedValues(DEFAULT_CONSOLE_OUTPUT,"json")
-                        .transformer((value, context) -> {
-                            if(value.equals(DEFAULT_CONSOLE_OUTPUT)) {
-                                return Boolean.FALSE.toString();
-                            }
-                            return Boolean.TRUE.toString();
-                        })
+                        .paramLabel("output")
+                        .transformer(LoggingPropertyMappers::resolveLogOutput)
                         .build(),
-                builder().from("log-console-format")
+                fromOption(LoggingOptions.LOG_CONSOLE_FORMAT)
+                        .isEnabled(LoggingPropertyMappers::isConsoleEnabled, CONSOLE_ENABLED_MSG)
                         .to("quarkus.log.console.format")
-                        .defaultValue("%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n")
-                        .description("The format of unstructured console log entries. If the format has spaces in it, escape the value using \"<format>\".")
                         .paramLabel("format")
                         .build(),
-                builder().from("log-console-color")
+                fromOption(LoggingOptions.LOG_CONSOLE_COLOR)
+                        .isEnabled(LoggingPropertyMappers::isConsoleEnabled, CONSOLE_ENABLED_MSG)
                         .to("quarkus.log.console.color")
-                        .defaultValue(Boolean.FALSE.toString())
-                        .description("Enable or disable colors when logging to console.")
-                        .paramLabel(Boolean.TRUE + "|" + Boolean.FALSE)
                         .build(),
-                builder().from("log-console-enabled")
+                fromOption(LoggingOptions.LOG_CONSOLE_ENABLED)
                         .mapFrom("log")
                         .to("quarkus.log.console.enable")
-                        .hidden(true)
-                        .transformer(resolveLogHandler(DEFAULT_LOG_HANDLER))
+                        .transformer(LoggingPropertyMappers.resolveLogHandler(LoggingOptions.DEFAULT_LOG_HANDLER.name()))
                         .build(),
-                builder().from("log-file-enabled")
+                // File
+                fromOption(LoggingOptions.LOG_FILE_ENABLED)
                         .mapFrom("log")
                         .to("quarkus.log.file.enable")
-                        .hidden(true)
-                        .transformer(resolveLogHandler("file"))
+                        .transformer(LoggingPropertyMappers.resolveLogHandler("file"))
                         .build(),
-                builder().from("log-file")
+                fromOption(LoggingOptions.LOG_FILE)
+                        .isEnabled(LoggingPropertyMappers::isFileEnabled, FILE_ENABLED_MSG)
                         .to("quarkus.log.file.path")
-                        .defaultValue(DEFAULT_LOG_PATH)
-                        .description("Set the log file path and filename.")
-                        .paramLabel("<path>/<file-name>.log")
+                        .paramLabel("file")
                         .transformer(LoggingPropertyMappers::resolveFileLogLocation)
                         .build(),
-                builder().from("log-file-format")
+                fromOption(LoggingOptions.LOG_FILE_FORMAT)
+                        .isEnabled(LoggingPropertyMappers::isFileEnabled, FILE_ENABLED_MSG)
                         .to("quarkus.log.file.format")
-                        .defaultValue("%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n")
-                        .description("Set a format specific to file log entries.")
-                        .paramLabel("<format>")
+                        .paramLabel("format")
+                        .build(),
+                fromOption(LoggingOptions.LOG_FILE_OUTPUT)
+                        .isEnabled(LoggingPropertyMappers::isFileEnabled, FILE_ENABLED_MSG)
+                        .to("quarkus.log.file.json")
+                        .paramLabel("output")
+                        .transformer(LoggingPropertyMappers::resolveLogOutput)
+                        .build(),
+                // Log level
+                fromOption(LoggingOptions.LOG_LEVEL)
+                        .to("quarkus.log.level")
+                        .transformer(LoggingPropertyMappers::resolveLogLevel)
+                        .validator((mapper, value) -> mapper.validateExpectedValues(value,
+                                (c, v) -> validateLogLevel(v)))
+                        .paramLabel("category:level")
+                        .build(),
+                // Syslog
+                fromOption(LoggingOptions.LOG_SYSLOG_ENABLED)
+                        .mapFrom("log")
+                        .to("quarkus.log.syslog.enable")
+                        .transformer(LoggingPropertyMappers.resolveLogHandler("syslog"))
+                        .build(),
+                fromOption(LoggingOptions.LOG_SYSLOG_ENDPOINT)
+                        .isEnabled(LoggingPropertyMappers::isSyslogEnabled, SYSLOG_ENABLED_MSG)
+                        .to("quarkus.log.syslog.endpoint")
+                        .paramLabel("host:port")
+                        .build(),
+                fromOption(LoggingOptions.LOG_SYSLOG_APP_NAME)
+                        .isEnabled(LoggingPropertyMappers::isSyslogEnabled, SYSLOG_ENABLED_MSG)
+                        .to("quarkus.log.syslog.app-name")
+                        .paramLabel("name")
+                        .build(),
+                fromOption(LoggingOptions.LOG_SYSLOG_PROTOCOL)
+                        .isEnabled(LoggingPropertyMappers::isSyslogEnabled, SYSLOG_ENABLED_MSG)
+                        .to("quarkus.log.syslog.protocol")
+                        .paramLabel("protocol")
+                        .build(),
+                fromOption(LoggingOptions.LOG_SYSLOG_FORMAT)
+                        .isEnabled(LoggingPropertyMappers::isSyslogEnabled, SYSLOG_ENABLED_MSG)
+                        .to("quarkus.log.syslog.format")
+                        .paramLabel("format")
+                        .build(),
+                fromOption(LoggingOptions.LOG_SYSLOG_OUTPUT)
+                        .isEnabled(LoggingPropertyMappers::isSyslogEnabled, SYSLOG_ENABLED_MSG)
+                        .to("quarkus.log.syslog.json")
+                        .paramLabel("output")
+                        .transformer(LoggingPropertyMappers::resolveLogOutput)
+                        .build(),
+        };
+
+        return GELF_ACTIVATED ? ArrayUtils.addAll(defaultMappers, getGelfMappers()) : defaultMappers;
+    }
+
+    public static PropertyMapper<?>[] getGelfMappers() {
+        return new PropertyMapper[]{
+                fromOption(LoggingOptions.LOG_GELF_ENABLED)
+                        .mapFrom("log")
+                        .to("quarkus.log.handler.gelf.enabled")
+                        .transformer(LoggingPropertyMappers.resolveLogHandler("gelf"))
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_LEVEL)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.level")
+                        .paramLabel("level")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_HOST)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.host")
+                        .paramLabel("hostname")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_PORT)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.port")
+                        .paramLabel("port")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_VERSION)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.version")
+                        .paramLabel("version")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_INCLUDE_STACK_TRACE)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.extract-stack-trace")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_TIMESTAMP_FORMAT)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.timestamp-pattern")
+                        .paramLabel("pattern")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_FACILITY)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.facility")
+                        .paramLabel("name")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_MAX_MSG_SIZE)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.maximum-message-size")
+                        .paramLabel("size")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_INCLUDE_LOG_MSG_PARAMS)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.include-log-message-parameters")
+                        .build(),
+                fromOption(LoggingOptions.LOG_GELF_INCLUDE_LOCATION)
+                        .isEnabled(LoggingPropertyMappers::isGelfEnabled, GELF_ENABLED_MSG)
+                        .to("quarkus.log.handler.gelf.include-location")
                         .build()
         };
     }
 
-    private static BiFunction<String, ConfigSourceInterceptorContext, String> resolveLogHandler(String handler) {
+    public static boolean isGelfEnabled() {
+        return isTrue(LoggingOptions.LOG_GELF_ENABLED);
+    }
+
+    public static boolean isConsoleEnabled() {
+        return isTrue(LoggingOptions.LOG_CONSOLE_ENABLED);
+    }
+
+    public static boolean isFileEnabled() {
+        return isTrue(LoggingOptions.LOG_FILE_ENABLED);
+    }
+
+    public static boolean isSyslogEnabled() {
+        return isTrue(LoggingOptions.LOG_SYSLOG_ENABLED);
+    }
+
+    private static BiFunction<Optional<String>, ConfigSourceInterceptorContext, Optional<String>> resolveLogHandler(String handler) {
         return (parentValue, context) -> {
+            String handlers = parentValue.get();
 
-            //we want to fall back to console to not have nothing shown up when wrong values are set.
-            String consoleDependantErrorResult = handler.equals(DEFAULT_LOG_HANDLER) ? Boolean.TRUE.toString() : Boolean.FALSE.toString();
+            String[] logHandlerValues = handlers.split(",");
 
-            if(parentValue.isBlank()) {
-                addInitializationException(Messages.emptyValueForKey("log"));
-                return consoleDependantErrorResult;
-            }
-
-            String[] logHandlerValues = parentValue.split(",");
-
-            if (!AVAILABLE_LOG_HANDLERS.containsAll(List.of(logHandlerValues))) {
-                addInitializationException(Messages.notRecognizedValueInList("log", parentValue, String.join(",", AVAILABLE_LOG_HANDLERS)));
-                return consoleDependantErrorResult;
-            }
-
-            for (String handlerInput : logHandlerValues) {
-                if (handlerInput.equals(handler)) {
-                    return Boolean.TRUE.toString();
-                }
-            }
-
-            return Boolean.FALSE.toString();
+            return of(String.valueOf(Stream.of(logHandlerValues).anyMatch(handler::equals)));
         };
     }
 
-    private static String resolveFileLogLocation(String value, ConfigSourceInterceptorContext configSourceInterceptorContext) {
-        if (value.endsWith(File.separator))
-        {
-            return value + DEFAULT_LOG_FILENAME;
-        }
-
-        return value;
+    private static Optional<String> resolveFileLogLocation(Optional<String> value, ConfigSourceInterceptorContext configSourceInterceptorContext) {
+        return value.map(location -> location.endsWith(File.separator) ? location + LoggingOptions.DEFAULT_LOG_FILENAME : location);
     }
 
     private static Level toLevel(String categoryLevel) throws IllegalArgumentException {
@@ -175,7 +219,50 @@ public final class LoggingPropertyMappers {
         LogContext.getLogContext().getLogger(category).setLevel(toLevel(level));
     }
 
-    private static PropertyMapper.Builder builder() {
-        return PropertyMapper.builder(ConfigCategory.LOGGING);
+    record CategoryLevel(String category, String levelName) {}
+
+    private static CategoryLevel validateLogLevel(String level) {
+        String[] parts = level.split(":");
+        String category = null;
+        String categoryLevel;
+
+        if (parts.length == 1) {
+            categoryLevel = parts[0];
+        } else if (parts.length == 2) {
+            category = parts[0];
+            categoryLevel = parts[1];
+        } else {
+            throw new PropertyException(Messages.invalidLogCategoryFormat(level));
+        }
+
+        try {
+            Level levelType = toLevel(categoryLevel);
+            return new CategoryLevel(category, levelType.getName());
+        } catch (IllegalArgumentException iae) {
+            throw new PropertyException(Messages.invalidLogCategoryFormat(level));
+        }
+    }
+
+    private static Optional<String> resolveLogLevel(Optional<String> value, ConfigSourceInterceptorContext configSourceInterceptorContext) {
+        Optional<String> rootLevel = of(LoggingOptions.DEFAULT_LOG_LEVEL.name());
+
+        for (String level : value.get().split(",")) {
+            var categoryLevel = validateLogLevel(level);
+            if (categoryLevel.category == null) {
+                rootLevel = of(categoryLevel.levelName);
+            } else {
+                setCategoryLevel(categoryLevel.category, categoryLevel.levelName);
+            }
+        }
+
+        return rootLevel;
+    }
+
+    private static Optional<String> resolveLogOutput(Optional<String> value, ConfigSourceInterceptorContext context) {
+        if (value.get().equals(LoggingOptions.DEFAULT_CONSOLE_OUTPUT.name().toLowerCase(Locale.ROOT))) {
+            return of(Boolean.FALSE.toString());
+        }
+
+        return of(Boolean.TRUE.toString());
     }
 }

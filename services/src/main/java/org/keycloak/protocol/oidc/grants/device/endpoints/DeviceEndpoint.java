@@ -18,7 +18,7 @@
 package org.keycloak.protocol.oidc.grants.device.endpoints;
 
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.HttpRequest;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.common.util.Base64Url;
 import org.keycloak.common.util.SecretGenerator;
@@ -30,11 +30,12 @@ import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.Constants;
+import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.OAuth2DeviceCodeModel;
-import org.keycloak.models.OAuth2DeviceTokenStoreProvider;
 import org.keycloak.models.OAuth2DeviceUserCodeModel;
 import org.keycloak.models.OAuth2DeviceUserCodeProvider;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.SingleUseObjectProvider;
 import org.keycloak.protocol.AuthorizationEndpointBase;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.endpoints.AuthorizationEndpointChecker;
@@ -45,30 +46,30 @@ import org.keycloak.protocol.oidc.grants.device.clientpolicy.context.DeviceAutho
 import org.keycloak.protocol.oidc.utils.AuthorizeClientUtil;
 import org.keycloak.representations.OAuth2DeviceAuthorizationResponse;
 import org.keycloak.saml.common.util.StringUtil;
-import org.keycloak.services.ErrorPageException;
 import org.keycloak.services.ErrorResponseException;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.Urls;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
+import org.keycloak.services.cors.Cors;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.services.resource.RealmResourceProvider;
-import org.keycloak.services.resources.Cors;
 import org.keycloak.services.util.CacheControlUtil;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.util.TokenUtil;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.OPTIONS;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.OPTIONS;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+
+import java.util.Map;
 
 import static org.keycloak.protocol.oidc.grants.device.DeviceGrantType.OAUTH2_DEVICE_USER_CODE;
 
@@ -79,13 +80,15 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
 
     protected static final Logger logger = Logger.getLogger(DeviceEndpoint.class);
 
-    @Context
-    private HttpRequest request;
+    public static final String SHORT_VERIFICATION_URI = "shortVerificationUri";
+
+    private final HttpRequest request;
 
     private Cors cors;
 
-    public DeviceEndpoint(RealmModel realm, EventBuilder event) {
-        super(realm, event);
+    public DeviceEndpoint(KeycloakSession session, EventBuilder event) {
+        super(session, event);
+        this.request = session.getContext().getHttpRequest();
     }
 
     /**
@@ -98,7 +101,7 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
     @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
     @Produces(MediaType.APPLICATION_JSON)
     public Response handleDeviceRequest() {
-        cors = Cors.add(request).auth().allowedMethods("POST").auth().exposedHeaders(Cors.ACCESS_CONTROL_ALLOW_METHODS);
+        cors = Cors.builder().auth().allowedMethods("POST").auth().exposedHeaders(Cors.ACCESS_CONTROL_ALLOW_METHODS);
 
         logger.trace("Processing @POST request");
         event.event(EventType.OAUTH2_DEVICE_AUTH);
@@ -109,19 +112,28 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
         ClientModel client = authenticateClient();
 
         AuthorizationEndpointRequest request = AuthorizationEndpointRequestParserProcessor.parseRequest(event, session, client,
-            httpRequest.getDecodedFormParameters());
+            httpRequest.getDecodedFormParameters(), AuthorizationEndpointRequestParserProcessor.EndpointType.OAUTH2_DEVICE_ENDPOINT);
+
+        if (request.getInvalidRequestMessage() != null) {
+            event.detail(Details.REASON, request.getInvalidRequestMessage());
+            event.error(Errors.INVALID_REQUEST);
+            throw new ErrorResponseException(OAuthErrorException.INVALID_GRANT,
+                request.getInvalidRequestMessage(), Response.Status.BAD_REQUEST);
+        }
 
         if (!TokenUtil.isOIDCRequest(request.getScope())) {
             ServicesLogger.LOGGER.oidcScopeMissing();
         }
 
         // So back button doesn't work
-        CacheControlUtil.noBackButtonCacheControlHeader();
+        CacheControlUtil.noBackButtonCacheControlHeader(session);
 
         if (!realm.getOAuth2DeviceConfig().isOAuth2DeviceAuthorizationGrantEnabled(client)) {
+            String errorMessage = "Client not allowed for OAuth 2.0 Device Authorization Grant";
+            event.detail(Details.REASON, errorMessage);
             event.error(Errors.NOT_ALLOWED);
             throw new ErrorResponseException(OAuthErrorException.INVALID_GRANT,
-                "Client not allowed for OAuth 2.0 Device Authorization Grant", Response.Status.BAD_REQUEST);
+                    errorMessage, Response.Status.BAD_REQUEST);
         }
 
         // https://tools.ietf.org/html/rfc7636#section-4
@@ -155,12 +167,16 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
         // To inform "expired_token" to the client, the lifespan of the cache provider is longer than device code
         int lifespanSeconds = expiresIn + interval + 10;
 
-        OAuth2DeviceTokenStoreProvider store = session.getProvider(OAuth2DeviceTokenStoreProvider.class);
-        store.put(deviceCode, userCode, lifespanSeconds);
+        SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+
+        singleUseStore.put(deviceCode.serializeKey(), lifespanSeconds, deviceCode.toMap());
+        singleUseStore.put(userCode.serializeKey(), lifespanSeconds, userCode.serializeValue());
 
         try {
-            String deviceUrl = DeviceGrantType.oauth2DeviceVerificationUrl(session.getContext().getUri()).build(realm.getName())
-                .toString();
+            String deviceUrl = realm.getAttribute(SHORT_VERIFICATION_URI);
+            if (deviceUrl == null || deviceUrl.isEmpty()) {
+                deviceUrl = DeviceGrantType.oauth2DeviceVerificationUrl(session.getContext().getUri()).build(realm.getName()).toString();
+            }
 
             OAuth2DeviceAuthorizationResponse response = new OAuth2DeviceAuthorizationResponse();
             response.setDeviceCode(deviceCode.getDeviceCode());
@@ -170,7 +186,7 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
             response.setVerificationUri(deviceUrl);
             response.setVerificationUriComplete(deviceUrl + "?user_code=" + response.getUserCode());
 
-            return cors.builder(Response.ok(JsonSerialization.writeValueAsBytes(response)).type(MediaType.APPLICATION_JSON_TYPE)).build();
+            return cors.add(Response.ok(JsonSerialization.writeValueAsBytes(response)).type(MediaType.APPLICATION_JSON_TYPE));
         } catch (Exception e) {
             throw new RuntimeException("Error creating OAuth 2.0 Device Authorization Response.", e);
         }
@@ -181,7 +197,7 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
         if (logger.isDebugEnabled()) {
             logger.debugv("CORS preflight from: {0}", headers.getRequestHeaders().getFirst("Origin"));
         }
-        return Cors.add(request, Response.ok()).auth().preflight().allowedMethods("POST", "OPTIONS").build();
+        return Cors.builder().auth().preflight().allowedMethods("POST", "OPTIONS").add(Response.ok());
     }
 
     /**
@@ -198,7 +214,7 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
         checkRealm();
 
         // So back button doesn't work
-        CacheControlUtil.noBackButtonCacheControlHeader();
+        CacheControlUtil.noBackButtonCacheControlHeader(session);
 
         // code is not known, we can infer the client neither. ask the user to provide the code.
         if (StringUtil.isNullOrEmpty(userCode)) {
@@ -206,10 +222,9 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
         } else {
             // code exists, probably due to using a verification_uri_complete. Start the authentication considering the client
             // that started the flow.
-            OAuth2DeviceTokenStoreProvider store = session.getProvider(OAuth2DeviceTokenStoreProvider.class);
             OAuth2DeviceUserCodeProvider userCodeProvider = session.getProvider(OAuth2DeviceUserCodeProvider.class);
             String formattedUserCode = userCodeProvider.format(userCode);
-            OAuth2DeviceCodeModel deviceCode = store.getByUserCode(realm, formattedUserCode);
+            OAuth2DeviceCodeModel deviceCode = getDeviceByUserCode(session, realm, formattedUserCode);
 
             if (deviceCode == null) {
                 return invalidUserCodeResponse(Messages.OAUTH2_DEVICE_INVALID_USER_CODE, "device code not found (it may already have been used)");
@@ -281,14 +296,29 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
         }
     }
 
+    public static OAuth2DeviceCodeModel getDeviceByUserCode(KeycloakSession session, RealmModel realm, String userCode) {
+        SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+        Map<String, String> notes = singleUseStore.get(OAuth2DeviceUserCodeModel.createKey(realm, userCode));
+
+        if (notes != null) {
+            OAuth2DeviceUserCodeModel data = OAuth2DeviceUserCodeModel.fromCache(realm, userCode, notes);
+            String deviceCode = data.getDeviceCode();
+            notes = singleUseStore.get(OAuth2DeviceCodeModel.createKey(deviceCode));
+
+            return notes != null ? OAuth2DeviceCodeModel.fromCache(realm, deviceCode, notes) : null;
+        }
+
+        return null;
+    }
+
     /**
      * @param errorMessage Message code for the verification page
      * @param reason For event details; not exposed to end user
      * @return Verification page response with error message
      */
     private Response invalidUserCodeResponse(String errorMessage, String reason) {
-        event.error(Errors.INVALID_OAUTH2_USER_CODE);
         event.detail(Details.REASON, reason);
+        event.error(Errors.INVALID_OAUTH2_USER_CODE);
         logger.debugf("invalid user code: %s", reason);
         return createVerificationPage(errorMessage);
     }
@@ -339,8 +369,7 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
 
         if (client == null) {
             event.error(Errors.INVALID_REQUEST);
-            throw new ErrorPageException(session, null, Response.Status.BAD_REQUEST, Messages.MISSING_PARAMETER,
-                OIDCLoginProtocol.CLIENT_ID_PARAM);
+            throw new ErrorResponseException(Errors.INVALID_REQUEST, "Missing parameters:"+ OIDCLoginProtocol.CLIENT_ID_PARAM,Response.Status.BAD_REQUEST);
         }
 
         checkClient(client.getClientId());
@@ -351,8 +380,7 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
     private ClientModel checkClient(String clientId) {
         if (clientId == null) {
             event.error(Errors.INVALID_REQUEST);
-            throw new ErrorPageException(session, null, Response.Status.BAD_REQUEST,
-                Messages.MISSING_PARAMETER, OIDCLoginProtocol.CLIENT_ID_PARAM);
+            throw new ErrorResponseException(Errors.INVALID_REQUEST, "Missing parameters:"+ OIDCLoginProtocol.CLIENT_ID_PARAM, Response.Status.BAD_REQUEST);
         }
 
         event.client(clientId);
@@ -360,24 +388,26 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
         ClientModel client = realm.getClientByClientId(clientId);
         if (client == null) {
             event.error(Errors.CLIENT_NOT_FOUND);
-            throw new ErrorPageException(session, null, Response.Status.BAD_REQUEST,
-                Messages.CLIENT_NOT_FOUND);
+            throw new ErrorResponseException(Errors.INVALID_CLIENT, "Client not found.", Response.Status.BAD_REQUEST);
         }
 
         if (!client.isEnabled()) {
             event.error(Errors.CLIENT_DISABLED);
-            throw new ErrorPageException(session, null, Response.Status.BAD_REQUEST, Messages.CLIENT_DISABLED);
+            throw new ErrorResponseException(Errors.INVALID_CLIENT, "Client disabled.", Response.Status.BAD_REQUEST);
         }
 
         if (!realm.getOAuth2DeviceConfig().isOAuth2DeviceAuthorizationGrantEnabled(client)) {
+            String errorMessage = "Client is not allowed to initiate OAuth 2.0 Device Authorization Grant. The flow is disabled for the client.";
+            event.detail(Details.REASON, errorMessage);
             event.error(Errors.NOT_ALLOWED);
-            throw new ErrorPageException(session, null, Response.Status.BAD_REQUEST,
-                Messages.OAUTH2_DEVICE_AUTHORIZATION_GRANT_DISABLED);
+            throw new ErrorResponseException(Errors.UNAUTHORIZED_CLIENT, errorMessage, Response.Status.BAD_REQUEST);
         }
 
         if (client.isBearerOnly()) {
+            String errorMessage = "Bearer-only applications are not allowed to initiate browser login.";
+            event.detail(Details.REASON, errorMessage);
             event.error(Errors.NOT_ALLOWED);
-            throw new ErrorPageException(session, null, Response.Status.FORBIDDEN, Messages.BEARER_ONLY);
+            throw new ErrorResponseException(Errors.UNAUTHORIZED_CLIENT, errorMessage, Response.Status.FORBIDDEN);
         }
 
         String protocol = client.getProtocol();
@@ -387,8 +417,10 @@ public class DeviceEndpoint extends AuthorizationEndpointBase implements RealmRe
             protocol = OIDCLoginProtocol.LOGIN_PROTOCOL;
         }
         if (!protocol.equals(OIDCLoginProtocol.LOGIN_PROTOCOL)) {
+            String errorMessage = "Wrong client protocol.";
+            event.detail(Details.REASON, errorMessage);
             event.error(Errors.INVALID_CLIENT);
-            throw new ErrorPageException(session, null, Response.Status.BAD_REQUEST, "Wrong client protocol.");
+            throw new ErrorResponseException(Errors.UNAUTHORIZED_CLIENT, errorMessage, Response.Status.BAD_REQUEST);
         }
 
         session.getContext().setClient(client);

@@ -17,6 +17,16 @@
 
 package org.keycloak.models.cache.infinispan.entities;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.component.ComponentModel;
@@ -40,17 +50,6 @@ import org.keycloak.models.WebAuthnPolicy;
 import org.keycloak.models.cache.infinispan.DefaultLazyLoader;
 import org.keycloak.models.cache.infinispan.LazyLoader;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
-
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
@@ -71,9 +70,11 @@ public class CachedRealm extends AbstractExtendableRevisioned {
     protected boolean resetPasswordAllowed;
     protected boolean identityFederationEnabled;
     protected boolean editUsernameAllowed;
+    protected boolean organizationsEnabled;
     //--- brute force settings
     protected boolean bruteForceProtected;
     protected boolean permanentLockout;
+    protected int maxTemporaryLockouts;
     protected int maxFailureWaitSeconds;
     protected int minimumQuickLoginWaitSeconds;
     protected int waitIncrementSeconds;
@@ -139,17 +140,18 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
     protected AuthenticationFlowModel browserFlow;
     protected AuthenticationFlowModel registrationFlow;
+    protected AuthenticationFlowModel orgRegistrationFlow;
     protected AuthenticationFlowModel directGrantFlow;
     protected AuthenticationFlowModel resetCredentialsFlow;
     protected AuthenticationFlowModel clientAuthenticationFlow;
     protected AuthenticationFlowModel dockerAuthenticationFlow;
+    protected AuthenticationFlowModel firstBrokerLoginFlow;
 
     protected boolean eventsEnabled;
     protected long eventsExpiration;
     protected Set<String> eventsListeners;
     protected Set<String> enabledEventTypes;
     protected boolean adminEventsEnabled;
-    protected Set<String> adminEnabledEventOperations = new HashSet<>();
     protected boolean adminEventsDetailsEnabled;
     protected String defaultRoleId;
     private boolean allowUserManagedAccess;
@@ -159,7 +161,6 @@ public class CachedRealm extends AbstractExtendableRevisioned {
     }
 
     protected List<String> defaultGroups;
-    protected List<String> clientScopes = new LinkedList<>();
     protected List<String> defaultDefaultClientScopes = new LinkedList<>();
     protected List<String> optionalDefaultClientScopes = new LinkedList<>();
     protected boolean internationalizationEnabled;
@@ -191,9 +192,11 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         resetPasswordAllowed = model.isResetPasswordAllowed();
         identityFederationEnabled = model.isIdentityFederationEnabled();
         editUsernameAllowed = model.isEditUsernameAllowed();
+        organizationsEnabled = model.isOrganizationsEnabled();
         //--- brute force settings
         bruteForceProtected = model.isBruteForceProtected();
         permanentLockout = model.isPermanentLockout();
+        maxTemporaryLockouts = model.getMaxTemporaryLockouts();
         maxFailureWaitSeconds = model.getMaxFailureWaitSeconds();
         minimumQuickLoginWaitSeconds = model.getMinimumQuickLoginWaitSeconds();
         waitIncrementSeconds = model.getWaitIncrementSeconds();
@@ -301,6 +304,7 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         resetCredentialsFlow = model.getResetCredentialsFlow();
         clientAuthenticationFlow = model.getClientAuthenticationFlow();
         dockerAuthenticationFlow = model.getDockerAuthenticationFlow();
+        firstBrokerLoginFlow = model.getFirstBrokerLoginFlow();
 
         model.getComponentsStream().forEach(component ->
             componentsByParentAndType.add(component.getParentId() + component.getProviderType(), component)
@@ -319,7 +323,6 @@ public class CachedRealm extends AbstractExtendableRevisioned {
     }
 
     protected void cacheClientScopes(RealmModel model) {
-        clientScopes = model.getClientScopesStream().map(ClientScopeModel::getId).collect(Collectors.toList());
         defaultDefaultClientScopes = model.getDefaultClientScopesStream(true).map(ClientScopeModel::getId)
                 .collect(Collectors.toList());
         optionalDefaultClientScopes = model.getDefaultClientScopesStream(false).map(ClientScopeModel::getId)
@@ -374,6 +377,10 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         return permanentLockout;
     }
 
+    public int getMaxTemporaryLockouts() {
+        return maxTemporaryLockouts;
+    }
+
     public int getMaxFailureWaitSeconds() {
         return this.maxFailureWaitSeconds;
     }
@@ -416,6 +423,10 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
     public boolean isEditUsernameAllowed() {
         return editUsernameAllowed;
+    }
+
+    public boolean isOrganizationsEnabled() {
+        return organizationsEnabled;
     }
 
     public String getDefaultSignatureAlgorithm() {
@@ -591,10 +602,6 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         return adminEventsEnabled;
     }
 
-    public Set<String> getAdminEnabledEventOperations() {
-        return adminEnabledEventOperations;
-    }
-
     public boolean isAdminEventsDetailsEnabled() {
         return adminEventsDetailsEnabled;
     }
@@ -683,12 +690,12 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         return dockerAuthenticationFlow;
     }
 
-    public List<String> getDefaultGroups() {
-        return defaultGroups;
+    public AuthenticationFlowModel getFirstBrokerLoginFlow() {
+        return firstBrokerLoginFlow;
     }
 
-    public List<String> getClientScopes() {
-        return clientScopes;
+    public List<String> getDefaultGroups() {
+        return defaultGroups;
     }
 
     public List<String> getDefaultDefaultClientScopes() {
@@ -725,17 +732,17 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
     public Integer getAttribute(String name, Integer defaultValue) {
         String v = getAttribute(name);
-        return v != null ? Integer.valueOf(v) : defaultValue;
+        return v != null && !v.isEmpty() ? Integer.valueOf(v) : defaultValue;
     }
 
     public Long getAttribute(String name, Long defaultValue) {
         String v = getAttribute(name);
-        return v != null ? Long.valueOf(v) : defaultValue;
+        return v != null && !v.isEmpty() ? Long.valueOf(v) : defaultValue;
     }
 
     public Boolean getAttribute(String name, Boolean defaultValue) {
         String v = getAttribute(name);
-        return v != null ? Boolean.valueOf(v) : defaultValue;
+        return v != null && !v.isEmpty() ? Boolean.valueOf(v) : defaultValue;
     }
 
     public Map<String, String> getAttributes() {

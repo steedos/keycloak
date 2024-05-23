@@ -64,9 +64,7 @@ public class RemoteCacheInvoker {
             return;
         }
 
-        V session = sessionWrapper.getEntity();
-
-        SessionUpdateTask.CacheOperation operation = task.getOperation(session);
+        SessionUpdateTask.CacheOperation operation = task.getOperation();
         SessionUpdateTask.CrossDCMessageStatus status = task.getCrossDCMessageStatus(sessionWrapper);
 
         if (status == SessionUpdateTask.CrossDCMessageStatus.NOT_NEEDED) {
@@ -106,8 +104,7 @@ public class RemoteCacheInvoker {
 
 
     private <K, V extends SessionEntity> void runOnRemoteCache(TopologyInfo topology, RemoteCache<K, SessionEntityWrapper<V>> remoteCache, long maxIdleMs, K key, MergedUpdate<V> task, SessionEntityWrapper<V> sessionWrapper) {
-        final V session = sessionWrapper.getEntity();
-        SessionUpdateTask.CacheOperation operation = task.getOperation(session);
+        SessionUpdateTask.CacheOperation operation = task.getOperation();
 
         switch (operation) {
             case REMOVE:
@@ -121,7 +118,7 @@ public class RemoteCacheInvoker {
             case ADD_IF_ABSENT:
                 SessionEntityWrapper<V> existing = remoteCache
                         .withFlags(Flag.FORCE_RETURN_VALUE)
-                        .putIfAbsent(key, sessionWrapper.forTransport(), -1, TimeUnit.MILLISECONDS, InfinispanUtil.toHotrodTimeMs(remoteCache, maxIdleMs), TimeUnit.MILLISECONDS);
+                        .putIfAbsent(key, sessionWrapper.forTransport(), InfinispanUtil.toHotrodTimeMs(remoteCache, task.getLifespanMs()), TimeUnit.MILLISECONDS, InfinispanUtil.toHotrodTimeMs(remoteCache, maxIdleMs), TimeUnit.MILLISECONDS);
                 if (existing != null) {
                     logger.debugf("Existing entity in remote cache for key: %s . Will update it", key);
 

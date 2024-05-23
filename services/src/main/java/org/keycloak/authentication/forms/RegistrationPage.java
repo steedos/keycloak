@@ -27,7 +27,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.provider.ProviderConfigProperty;
 
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
@@ -42,6 +42,7 @@ public class RegistrationPage implements FormAuthenticator, FormAuthenticatorFac
     public static final String FIELD_USERNAME = "username";
     public static final String FIELD_LAST_NAME = "lastName";
     public static final String FIELD_FIRST_NAME = "firstName";
+    public static final String FIELD_RECAPTCHA_RESPONSE = "g-recaptcha-response";
     public static final String PROVIDER_ID = "registration-page-form";
 
     @Override
@@ -83,6 +84,7 @@ public class RegistrationPage implements FormAuthenticator, FormAuthenticatorFac
             AuthenticationExecutionModel.Requirement.REQUIRED,
             AuthenticationExecutionModel.Requirement.DISABLED
     };
+
     @Override
     public AuthenticationExecutionModel.Requirement[] getRequirementChoices() {
         return REQUIREMENT_CHOICES;

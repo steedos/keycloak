@@ -36,7 +36,7 @@ import org.keycloak.models.sessions.infinispan.events.RealmRemovedSessionEvent;
 import org.keycloak.models.sessions.infinispan.events.SessionEventsSenderTransaction;
 import org.keycloak.models.sessions.infinispan.stream.RootAuthenticationSessionPredicate;
 import org.keycloak.models.sessions.infinispan.util.InfinispanKeyGenerator;
-import org.keycloak.models.utils.RealmInfoUtil;
+import org.keycloak.models.utils.SessionExpiration;
 import org.keycloak.sessions.AuthenticationSessionCompoundId;
 import org.keycloak.sessions.AuthenticationSessionProvider;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
@@ -45,8 +45,6 @@ import org.keycloak.sessions.RootAuthenticationSessionModel;
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
 public class InfinispanAuthenticationSessionProvider implements AuthenticationSessionProvider {
-
-    private static final Logger log = Logger.getLogger(InfinispanAuthenticationSessionProvider.class);
 
     private final KeycloakSession session;
     private final Cache<String, RootAuthenticationSessionEntity> cache;
@@ -78,12 +76,11 @@ public class InfinispanAuthenticationSessionProvider implements AuthenticationSe
 
     @Override
     public RootAuthenticationSessionModel createRootAuthenticationSession(RealmModel realm, String id) {
-        RootAuthenticationSessionEntity entity = new RootAuthenticationSessionEntity();
-        entity.setId(id);
+        RootAuthenticationSessionEntity entity = new RootAuthenticationSessionEntity(id);
         entity.setRealmId(realm.getId());
         entity.setTimestamp(Time.currentTime());
 
-        int expirationSeconds = RealmInfoUtil.getDettachedClientSessionLifespan(realm);
+        int expirationSeconds = SessionExpiration.getAuthSessionLifespan(realm);
         tx.put(cache, id, entity, expirationSeconds, TimeUnit.SECONDS);
 
         return wrap(realm, entity);
@@ -140,10 +137,6 @@ public class InfinispanAuthenticationSessionProvider implements AuthenticationSe
 //        clusterEventsSenderTx.addEvent(
 //                ClientRemovedSessionEvent.create(session, InfinispanAuthenticationSessionProviderFactory.CLIENT_REMOVED_AUTHSESSION_EVENT, realm.getId(), false, client.getId()),
 //                ClusterProvider.DCNotify.ALL_DCS);
-    }
-
-    protected void onClientRemovedEvent(String realmId, String clientUuid) {
-
     }
 
 

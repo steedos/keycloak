@@ -6,7 +6,7 @@ rules:
   - apiGroups:
       - apps
     resources:
-      - deployments
+      - statefulsets
     verbs:
       - get
       - list
@@ -15,6 +15,14 @@ rules:
       - delete
       - patch
       - update
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - ""
     resources:
@@ -28,6 +36,12 @@ rules:
       - delete
       - patch
       - update
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - list
   - apiGroups:
       - batch
     resources:
@@ -54,6 +68,18 @@ rules:
       - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keycloak-operator-clusterrole
+rules:
+  - apiGroups:
+      - config.openshift.io
+    resources:
+      - ingresses
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   labels:
@@ -66,3 +92,18 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: keycloak-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: keycloak-operator
+  name: keycloak-operator-clusterrole-binding
+roleRef:
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+  name: keycloak-operator-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: keycloak-operator
+    namespace: keycloak

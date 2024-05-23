@@ -19,15 +19,21 @@ public class SelectAuthenticatorPage extends LanguageComboboxAwarePage {
     // Corresponds to the PasswordForm
     public static final String PASSWORD = "Password";
 
+    // Corresponds to the UsernameForm
+    public static final String USERNAME = "Username";
+
+    // Corresponds to the UsernamePasswordForm
+    public static final String USERNAMEPASSWORD = "Username and password";
+
     // Corresponds to the OTPFormAuthenticator
     public static final String AUTHENTICATOR_APPLICATION = "Authenticator Application";
 
     // Corresponds to the WebAuthn authenticators
-    public static final String SECURITY_KEY = "Security Key";
+    public static final String SECURITY_KEY = "Passkey";
 
     public static final String RECOVERY_AUTHN_CODES = "Recovery Authentication Code";
     /**
-     * Return list of names like for example [ "Password", "Authenticator Application", "Security Key" ]
+     * Return list of names like for example [ "Password", "Authenticator Application", "Passkey" ]
      */
     public List<String> getAvailableLoginMethods() {
         List<WebElement> rows = getLoginMethodsRows();

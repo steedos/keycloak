@@ -23,6 +23,7 @@ import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.keycloak.admin.client.resource.UserResource;
+import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
 import org.keycloak.models.UserModel;
 import org.keycloak.representations.idm.EventRepresentation;
@@ -92,7 +93,8 @@ public class AppInitiatedActionResetPasswordTest extends AbstractAppInitiatedAct
 
         EventRepresentation loginEvent = events.expectLogin().assertEvent();
 
-        oauth.openLogout();
+        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
 
         events.expectLogout(loginEvent.getSessionId()).assertEvent();
 
@@ -125,6 +127,54 @@ public class AppInitiatedActionResetPasswordTest extends AbstractAppInitiatedAct
 
         events.expectRequiredAction(EventType.UPDATE_PASSWORD).assertEvent();
         assertKcActionStatus(SUCCESS);
+    }
+
+    /**
+     * See GH-12943
+     * @throws Exception
+     */
+    @Test
+    public void resetPasswordRequiresReAuthWithMaxAuthAgePasswordPolicy() throws Exception {
+
+        // set password policy
+        RealmRepresentation currentTestRealmRep = testRealm().toRepresentation();
+        String previousPasswordPolicy = currentTestRealmRep.getPasswordPolicy();
+        if (previousPasswordPolicy == null) {
+            previousPasswordPolicy = "";
+        }
+        currentTestRealmRep.setPasswordPolicy("maxAuthAge(0)");
+        try {
+            testRealm().update(currentTestRealmRep);
+
+            loginPage.open();
+            loginPage.login("test-user@localhost", "password");
+
+            events.expectLogin().assertEvent();
+
+            // we need to add some slack to avoid timing issues
+            setTimeOffset(1);
+
+            // Should prompt for re-authentication due to maxAuthAge password policy
+            doAIA();
+
+            loginPage.assertCurrent();
+
+            Assert.assertEquals("test-user@localhost", loginPage.getAttemptedUsername());
+
+            loginPage.login("password");
+
+            changePasswordPage.assertCurrent();
+            assertTrue(changePasswordPage.isCancelDisplayed());
+
+            changePasswordPage.changePassword("new-password", "new-password");
+
+            events.expectRequiredAction(EventType.UPDATE_PASSWORD).assertEvent();
+            assertKcActionStatus(SUCCESS);
+        } finally {
+            // reset password policy to previous state
+            currentTestRealmRep.setPasswordPolicy(previousPasswordPolicy);
+            testRealm().update(currentTestRealmRep);
+        }
     }
 
     @Test
@@ -178,7 +228,7 @@ public class AppInitiatedActionResetPasswordTest extends AbstractAppInitiatedAct
         final String firstSessionId = sessions.get(0).getId();
 
         oauth2.doLogin("test-user@localhost", "password");
-        events.expectLogin().assertEvent();
+        EventRepresentation event2 = events.expectLogin().assertEvent();
         assertEquals(2, testUser.getUserSessions().size());
 
         doAIA();
@@ -186,6 +236,7 @@ public class AppInitiatedActionResetPasswordTest extends AbstractAppInitiatedAct
         changePasswordPage.assertCurrent();
         assertTrue("Logout sessions is checked by default", changePasswordPage.isLogoutSessionsChecked());
         changePasswordPage.changePassword("All Right Then, Keep Your Secrets", "All Right Then, Keep Your Secrets");
+        events.expectLogout(event2.getSessionId()).detail(Details.LOGOUT_TRIGGERED_BY_REQUIRED_ACTION, UserModel.RequiredAction.UPDATE_PASSWORD.name()).assertEvent();
         events.expectRequiredAction(EventType.UPDATE_PASSWORD).assertEvent();
         assertKcActionStatus(SUCCESS);
 

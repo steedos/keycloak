@@ -369,7 +369,7 @@ public class OAuthRequestAuthenticator {
         if (tokenResponse.getNotBeforePolicy() > deployment.getNotBefore()) {
             deployment.updateNotBefore(tokenResponse.getNotBeforePolicy());
         }
-        if (token.getIssuedAt() < deployment.getNotBefore()) {
+        if (token.getIat() < deployment.getNotBefore()) {
             log.error("Stale token");
             return challenge(403, OIDCAuthenticationError.Reason.STALE_TOKEN, null);
         }
@@ -384,7 +384,8 @@ public class OAuthRequestAuthenticator {
         KeycloakUriBuilder builder = KeycloakUriBuilder.fromUri(facade.getRequest().getURI())
                 .replaceQueryParam(OAuth2Constants.CODE, null)
                 .replaceQueryParam(OAuth2Constants.STATE, null)
-                .replaceQueryParam(OAuth2Constants.SESSION_STATE, null);
+                .replaceQueryParam(OAuth2Constants.SESSION_STATE, null)
+                .replaceQueryParam(OAuth2Constants.ISSUER, null);
         return builder.buildAsString();
     }
     
